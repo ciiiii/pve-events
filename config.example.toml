@@ -1,0 +1,94 @@
+# pve-events — every setting, with its default.
+# Every key here also has a PVE_* environment variable, and the environment wins.
+# A config file is entirely optional; env alone is enough to run.
+
+# --- top level: must come before the first [table] header ---
+
+# Where the watermark and the seen-UPID set live. Must be writable by uid 65534
+# in the container image.
+state_path = "/data/state.json"
+
+# On a FIRST run only, use this unix timestamp as the watermark instead of "now".
+# 0 replays everything still in the API's window -- handy for one smoke test,
+# noisy as a permanent setting.
+# backfill_from = 0
+
+
+[pve]
+url = "https://10.0.0.100:8006"
+user = "monitor@pve"
+token_name = "events"
+# Leave token_value out of the file and pass PVE_TOKEN_VALUE in the environment.
+# token_value = ""
+
+# Poll one node instead of the whole cluster. Unset = /cluster/tasks.
+# node = "pve"
+
+# The Proxmox UI cert is normally issued by a private CA, which the built-in
+# Mozilla roots cannot verify. Point at that CA rather than turning verification
+# off; `verify_tls = false` is the last resort, not the first.
+# ca_bundle = "/etc/ssl/pve-ca.crt"
+verify_tls = true
+
+poll_interval_secs = 20
+timeout_secs = 15
+
+
+[filter]
+# Catalogue groups. `backup` and `system` are off by default because PVE already
+# notifies on those natively (vzdump / package-updates) -- enabling them here
+# means two notifications per event.
+# Run `pve-events --list-groups` to see the task types in each.
+groups = ["vm", "ct", "disk"]
+
+# Opt individual task types in or out regardless of group. `exclude` wins.
+include_types = []
+exclude_types = []
+
+# "info" forwards everything, "error" forwards only failed tasks.
+min_severity = "info"
+
+# Every list below is an allowlist when non-empty and "allow all" when empty.
+# A trailing * is a prefix wildcard.
+guests = []
+exclude_guests = []
+nodes = []
+users = []
+# Silence a Terraform/CI token: one apply can emit a dozen tasks.
+# NOTE this matches the full user!token identity, which PVE splits across two
+# fields in its API response and this tool recomposes.
+exclude_users = []
+
+
+[sink]
+# webhook | discord | slack | ntfy | gotify | telegram | portal | stdout
+kind = "webhook"
+url = "https://example.com/hook"
+method = "POST"
+
+# Body template. Every preset except `webhook` ships one, so this is only needed
+# for kind = "webhook" -- or to override a preset.
+#
+#   {{field}}      substituted and JSON-string-escaped (the safe default: PVE
+#                  error text routinely contains quotes and apostrophes)
+#   {{raw:field}}  substituted verbatim, for numbers and pre-built JSON
+#
+# Fields: title body severity color emoji verb subject guest node user tokenid
+#         status type group upid duration endtime
+#
+# An unknown field name is a startup error, not a silently empty string.
+body = '''
+{"text": "{{title}}", "detail": "{{body}}", "level": "{{severity}}", "vm": "{{guest}}"}
+'''
+
+# Optional: a different template for failed tasks. Falls back to `body`.
+# body_error = '''
+# {"text": "{{title}}", "detail": "{{body}}", "level": "error", "notify": true}
+# '''
+
+# KEEP THIS TABLE LAST. In TOML every key after a [table] header belongs to that
+# table, so a `body =` placed below this line becomes an HTTP header named
+# "body" -- and headers are a free-form map, so nothing would reject it.
+[sink.headers]
+# Content-Type is set by the preset; anything here is added or overrides it.
+# Authorization = "Bearer ..."

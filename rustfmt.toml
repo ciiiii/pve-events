@@ -1,0 +1,5 @@
+# The task catalogue is a wide table of one-line entries; letting small
+# constructs use the full width keeps it readable as a table rather than
+# exploding every tuple across five lines.
+max_width = 110
+use_small_heuristics = "Max"
