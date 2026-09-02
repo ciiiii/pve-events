@@ -112,16 +112,20 @@ impl Event {
 
         let identity = task.identity();
         let duration_secs = (endtime - task.starttime).max(0);
+        // A markdown bullet list, and `**bold**` not `*bold*`. Both matter:
+        // CommonMark reads a single `*` as ITALIC and collapses a lone `\n` into
+        // the same paragraph, so the Telegram-flavoured `*Label*` + "\n" version
+        // arrived at web renderers as one run-on italic line.
         let mut lines = vec![
-            format!("*Task*: `{}`", task.task_type),
-            format!("*Node*: {}", task.node),
-            format!("*By*: {identity}"),
-            format!("*Status*: {}", if task.status.is_empty() { "unknown" } else { &task.status }),
+            format!("- **Task**: `{}`", task.task_type),
+            format!("- **Node**: {}", task.node),
+            format!("- **By**: {identity}"),
+            format!("- **Status**: {}", if task.status.is_empty() { "unknown" } else { &task.status }),
         ];
         // Sub-second tasks are the common case; printing "0s" for every start
         // is noise, so the line only appears when it says something.
         if duration_secs > 1 {
-            lines.push(format!("*Took*: {duration_secs}s"));
+            lines.push(format!("- **Took**: {duration_secs}s"));
         }
 
         Some(Event {
@@ -214,7 +218,7 @@ mod tests {
         let e = Event::from_task(&t).unwrap();
         assert_eq!(e.user, "root@pam!terraform");
         assert_eq!(e.tokenid, "terraform");
-        assert!(e.body.contains("*By*: root@pam!terraform"));
+        assert!(e.body.contains("- **By**: root@pam!terraform"));
     }
 
     #[test]
@@ -230,6 +234,26 @@ mod tests {
     }
 
     #[test]
+    fn body_is_commonmark_not_telegram_flavoured_markdown() {
+        // Regression: the body used `*Label*` + "\n", which is Telegram's legacy
+        // dialect. CommonMark reads a single `*` as ITALIC and folds a lone `\n`
+        // into the same paragraph, so web renderers showed one run-on italic
+        // line instead of four bold-labelled rows.
+        let body = Event::from_task(&task("qmsnapshot", "1400", "OK")).unwrap().body;
+        for line in body.lines() {
+            assert!(line.starts_with("- **"), "every row must be a bold-labelled list item: {line:?}");
+        }
+        // A lone `*` anywhere would italicise rather than embolden.
+        // Strip the `**` pairs first: `- **Task**` trivially *contains* "*Task*",
+        // so a naive substring check can never distinguish the two dialects.
+        assert!(
+            !body.replace("**", "").contains('*'),
+            "a lone `*` is italic, not bold, in CommonMark: {body:?}"
+        );
+        assert_eq!(body.matches("- **").count(), body.lines().count());
+    }
+
+    #[test]
     fn unknown_task_types_are_dropped() {
         assert!(Event::from_task(&task("somethingnew", "1", "OK")).is_none());
     }
@@ -239,7 +263,7 @@ mod tests {
         let mut t = task("qmstart", "1440", "OK");
         t.endtime = Some(t.starttime);
         assert!(!Event::from_task(&t).unwrap().body.contains("Took"));
-        assert!(Event::from_task(&task("qmstart", "1440", "OK")).unwrap().body.contains("Took*: 10s"));
+        assert!(Event::from_task(&task("qmstart", "1440", "OK")).unwrap().body.contains("- **Took**: 10s"));
     }
 
     #[test]
